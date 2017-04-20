@@ -1,20 +1,18 @@
 // Imports the express Node module.
 var express = require('express');
-// Creates an Express server.
 var app = express();
-
 var bodyParser = require('body-parser');
 app.use(bodyParser.text());
-
-// You run the server from `server`, so `../client/build` is `server/../client/build`.
-// '..' means "go up one directory", so this translates into `client/build`!
+app.use(bodyParser.json());
 app.use(express.static('../client/build'));
+var database = require('./database.js');
+var StatusUpdateSchema = require('./schemas/statusupdate.json');
+var validate = require('express-jsonschema').validate;
+var writeDocument = database.writeDocument;
+var addDocument = database.addDocument;
+var CommentSchema = require('./schemas/comment.json');
+var readDocument = require('./database.js').readDocument;
 
-var DataBase = require('./database.js');
-var readDocument = DataBase.readDocument
-/**
- * Resolves a feed item. Internal to the server, since it's synchronous.
- */
 function getFeedItemSync(feedItemId) {
   var feedItem = readDocument('feedItems', feedItemId);
   // Resolve 'like' counter.
@@ -33,7 +31,7 @@ function getFeedItemSync(feedItemId) {
 
 /**
  * Get the feed data for a particular user.
- */
+ *////
 function getFeedData(user) {
   var userData = readDocument('users', user);
   var feedData = readDocument('feeds', userData.feed);
@@ -47,7 +45,7 @@ function getFeedData(user) {
 /**
  * Get the user ID from a token. Returns -1 (an invalid ID)
  * if it fails.
- */
+ *////
 function getUserIdFromToken(authorizationLine) {
   try {
     // Cut off "Bearer " from the header value.
@@ -72,7 +70,7 @@ function getUserIdFromToken(authorizationLine) {
 
 /**
  * Get the feed data for a particular user.
- */
+ *///
 app.get('/user/:userid/feed', function(req, res) {
   var userid = req.params.userid;
   var fromUser = getUserIdFromToken(req.get('Authorization'));
@@ -88,20 +86,7 @@ app.get('/user/:userid/feed', function(req, res) {
   }
 });
 
-var database =require('./database')
-var StatusUpdateSchema = require('./schemas/statusupdate.json');
-var validate = require('express-jsonschema').validate;
-var writeDocument = database.writeDocument;
-var addDocument = database.addDocument;
 
-// Support receiving text in HTTP request bodies
-app.use(bodyParser.text());
-// Support receiving JSON in HTTP request bodies
-app.use(bodyParser.json());
-
-/**
- * Adds a new status update to the database.
- */
 function postStatusUpdate(user, location, contents) {
   // If we were implementing this for real on an actual server, we would check
   // that the user ID is correct & matches the authenticated user. But since
@@ -141,8 +126,7 @@ function postStatusUpdate(user, location, contents) {
 }
 
 // `POST /feeditem { userId: user, location: location, contents: contents  }`
-app.post('/feeditem',
-         validate({ body: StatusUpdateSchema }), function(req, res) {
+app.post('/feeditem', validate({ body: StatusUpdateSchema }), function(req, res) {
   // If this function runs, `req.body` passed JSON validation!
   var body = req.body;
   var fromUser = getUserIdFromToken(req.get('Authorization'));
@@ -278,28 +262,75 @@ app.post('/search', function(req, res) {
   var fromUser = getUserIdFromToken(req.get('Authorization'));
   var user = readDocument('users', fromUser);
   if (typeof(req.body) === 'string') {
-    // trim() removes whitespace before and after the query.
-    // toLowerCase() makes the query lowercase.
     var queryText = req.body.trim().toLowerCase();
-    // Search the user's feed.
     var feedItemIDs = readDocument('feeds', user.feed).contents;
-    // "filter" is like "map" in that it is a magic method for
-    // arrays. It takes an anonymous function, which it calls
-    // with each item in the array. If that function returns 'true',
-    // it will include the item in a return array. Otherwise, it will
-    // not.
-    // Here, we use filter to return only feedItems that contain the
-    // query text.
-    // Since the array contains feed item IDs, we later map the filtered
-    // IDs to actual feed item objects.
     res.send(feedItemIDs.filter((feedItemID) => {
       var feedItem = readDocument('feedItems', feedItemID);
       return feedItem.contents.contents.toLowerCase().indexOf(queryText) !== -1;
     }).map(getFeedItemSync));
   } else {
-    // 400: Bad Request.
     res.status(400).end();
   }
+});
+
+app.post('/feeditem/:feeditemid/commentthread/comment',validate({ body: CommentSchema}),function(req,res){
+  var body = req.body;
+  var fromUser = getUserIdFromToken(req.get('Authorization'));
+  var feedItemId = req.params.feeditemid;
+  var feedItem = readDocument('feedItems', feedItemId);
+  if (fromUser === body.author) {
+      feedItem.comments.push({
+      "author": body.author,
+      "contents": body.contents,
+      "postDate": new Date().getTime(),
+      "likeCounter": []
+});
+    writeDocument('feedItems', feedItem);
+    res.status(201);
+    res.set('Location', '/feeditem/' + feedItem._id);
+    res.send(getFeedItemSync(feedItemId));
+  }
+  else{
+    res.status(401).end();
+  }
+});
+
+app.put('/feeditem/:feeditemid/commentthread/comment/:commentIdx/likelist/:userId',function(req,res){
+  var fromUser = getUserIdFromToken(req.get('Authorization'));
+  var feedItemId = parseInt(req.params.feeditemid,10);
+  var commentIdx = parseInt(req.params.commentIdx,10);
+  var userId = parseInt(req.params.userId,10);
+  if(fromUser === userId){
+    var feedItem = readDocument('feedItems',feedItemId);
+    var comment = feedItem.comments[commentIdx];
+    if(comment.likeCounter.indexOf(userId)===-1)
+    {comment.likeCounter.push(userId);}
+    writeDocument('feedItems',feedItem);
+    comment.author = readDocument('users',comment.author);
+    res.status(201);
+    res.send(comment);
+}
+  else
+  {res.send(401).end();}
+});
+app.delete('/feeditem/:feeditemid/commentthread/comment/:commentIdx/likelist/:userId',function(req,res){
+  var fromUser = getUserIdFromToken(req.get('Authorization'));
+  var feedItemId = parseInt(req.params.feeditemid,10);
+  var commentIdx = parseInt(req.params.commentIdx,10);
+  var userId = parseInt(req.params.userId,10);
+  if(fromUser === userId){
+    var feedItem = readDocument('feedItems',feedItemId);
+    var comment = feedItem.comments[commentIdx];
+    if(comment.likeCounter.indexOf(userId)!==-1)
+    {comment.likeCounter.splice(comment.likeCounter.indexOf(userId),1);
+    writeDocument('feedItems',feedItem);}
+
+    comment.author = readDocument('users',comment.author);
+     res.status(201);
+    res.send(comment);
+}
+  else
+  {res.send(401).end();}
 });
 
 /**

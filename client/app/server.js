@@ -109,19 +109,14 @@ function sendXHR(verb, resource, body, cb) {
      cb(JSON.parse(xhr.responseText));
    });
  }
-export function postComment(feedItemId, author, contents, cb) {
-  var feedItem = readDocument('feedItems', feedItemId);
-  feedItem.comments.push({
-    "author": author,
-    "contents": contents,
-    "postDate": new Date().getTime(),
-    "likeCounter": []
-  });
-  writeDocument('feedItems', feedItem);
-  // Return a resolved version of the feed item.
-  emulateServerReturn(getFeedItemSync(feedItemId), cb);
-}
-
+ export function postComment(feedItemId, author, contents, cb) {
+   sendXHR('POST','/feedItem/'+feedItemId+'/commentthread/comment',{
+   author:author,
+   contents:contents
+ },
+ (xhr)=>{cb(JSON.parse(xhr.responseText));
+ });
+ }
 /**
  * Updates a feed item's likeCounter by adding the user to the likeCounter.
  * Provides an updated likeCounter in the response.
@@ -144,40 +139,34 @@ export function unlikeFeedItem(feedItemId, userId, cb) {
   });
 }
 
+
 /**
  * Adds a 'like' to a comment.
  */
 export function likeComment(feedItemId, commentIdx, userId, cb) {
-  var feedItem = readDocument('feedItems', feedItemId);
-  var comment = feedItem.comments[commentIdx];
-  comment.likeCounter.push(userId);
-  writeDocument('feedItems', feedItem);
-  comment.author = readDocument('users', comment.author);
-  emulateServerReturn(comment, cb);
+  sendXHR('PUT','/feedItem/'+feedItemId+'/commentthread/comment/'+commentIdx+'/likelist/'+userId,undefined,(xhr)=>{
+  cb(JSON.parse(xhr.responseText));
+});
 }
 
 /**
  * Removes a 'like' from a comment.
  */
 export function unlikeComment(feedItemId, commentIdx, userId, cb) {
-  var feedItem = readDocument('feedItems', feedItemId);
-  var comment = feedItem.comments[commentIdx];
-  var userIndex = comment.likeCounter.indexOf(userId);
-  if (userIndex !== -1) {
-    comment.likeCounter.splice(userIndex, 1);
-    writeDocument('feedItems', feedItem);
-  }
-  comment.author = readDocument('users', comment.author);
-  emulateServerReturn(comment, cb);
+  sendXHR('DELETE','/feeditem/'+feedItemId+'/commentthread/comment/'+commentIdx+'/likelist/'+userId,undefined,(xhr)=>{
+  cb(JSON.parse(xhr.responseText));
+  });
 }
+
 /**
  * Updates the text in a feed item (assumes a status update)
  */
 export function updateFeedItemText(feedItemId, newContent, cb) {
   sendXHR('PUT', '/feeditem/' + feedItemId + '/content', newContent, (xhr) => {
-    cb(JSON.parse(xhr.responseText));
-  });
+  cb(JSON.parse(xhr.responseText));
+});
 }
+
 /**
  * Deletes a feed item.
  */
@@ -186,12 +175,13 @@ export function deleteFeedItem(feedItemId, cb) {
     cb();
   });
 }
+
 /**
  * Searches for feed items with the given text.
  */
-export function searchForFeedItems(userID, queryText, cb) {
+export function searchForFeedItems(userId, queryText, cb) {
   // userID is not needed; it's included in the JSON web token.
-  sendXHR('POST', '/search', queryText, (xhr) => {
-    cb(JSON.parse(xhr.responseText));
-  });
+sendXHR('POST', '/search', queryText, (xhr) => {
+cb(JSON.parse(xhr.responseText));
+});
 }
